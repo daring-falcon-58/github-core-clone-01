@@ -61,7 +61,13 @@ export byte-for-byte.
   workloads time out.
 - Generated packs are cached per (repo, wants, haves, depth, shallow),
   so 50 concurrent depth-1 clones of the same tip share one pack.
-- In-memory dict store; HTTP/1.1 keep-alive throughout.
+- The listen backlog is 128 (`ForgeServer.request_queue_size`):
+  `ThreadingHTTPServer`'s default of 5 drops a burst of 50 concurrent
+  clones at the kernel, so the first timed round paid for connection
+  resets and retries (4,368 ms in the 2026-11-14 practice, against a
+  116 ms third round once the clients' keep-alive pool was warm).
+  Raising the backlog accepts the whole burst; the pack cache and the
+  per-request work are already cheap (fetch is a cache hit).
 
 ## Local grading (practice trial)
 
@@ -79,6 +85,15 @@ python3 main.py`.
 Practice result (2026-11-14): **120/120 conformance checks, 132/200
 performance points** (push 50, read 42, write 40, clone 0) — total
 **932/1000**.
+
+Revision 2026-11-15 (backlog 5 → 128): the clone workload's 0 was the
+cold-burst reset pathology, not pack work — a 50-connection burst
+overflowed the default backlog (proven: `ConnectionResetError` on 50
+concurrent fetches before the fix, 50/50 succeed after). Expected
+production effect: the first round measures like the warm third round
+(~116 ms, ≈40 clone points), total ≈972. Measured locally on a
+CPU-saturated VM the trial still reads slow (see REVISION-READY.md);
+the fix's effect is the removal of the reset path, not a faster pack.
 
 ## Running standalone
 

@@ -3065,16 +3065,26 @@ def http_get_json(url, timeout=10):
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
+class ForgeServer(ThreadingHTTPServer):
+    """Threaded HTTP server with a listen backlog sized for the bench.
+
+    ThreadingHTTPServer's default request_queue_size is 5: a burst of 50
+    concurrent clones (the clone workload's round shape) overflows the
+    backlog and the kernel resets the excess connections, so the round
+    pays for retries instead of work. 128 accepts the whole burst.
+    """
+    daemon_threads = True
+    request_queue_size = 128
+
+
 def main():
-    server = ThreadingHTTPServer(("127.0.0.1", 0), ForgeHandler)
-    server.daemon_threads = True
+    server = ForgeServer(("127.0.0.1", 0), ForgeHandler)
     port = server.server_address[1]
     if not ENV_URL:
         # Standalone mode (local dev/testing): fixed port, serve forever.
         fixed = int(os.environ.get("FORGE_PORT", "8080"))
         server.server_close()
-        server = ThreadingHTTPServer(("127.0.0.1", fixed), ForgeHandler)
-        server.daemon_threads = True
+        server = ForgeServer(("127.0.0.1", fixed), ForgeHandler)
         sys.stderr.write("makefun-forge standalone on http://127.0.0.1:%d\n" % fixed)
         sys.stderr.flush()
         try:
